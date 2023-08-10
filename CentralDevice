@@ -1,0 +1,145 @@
+#include <ArduinoBLE.h>
+
+void setup() {
+  Serial.begin(9600);
+  while (!Serial);
+
+  // initialize the Bluetooth® Low Energy hardware
+  BLE.begin();
+
+  Serial.println("Bluetooth® Low Energy Central - LED control");
+
+  // start scanning for peripherals
+  BLE.scanForUuid("19b10000-e8f2-537e-4f6c-d104768a1214");
+}
+
+void loop() {
+  // check if a peripheral has been discovered
+  BLEDevice peripheral = BLE.available();
+
+  if (peripheral) {
+    // discovered a peripheral, print out address, local name, and advertised service
+    Serial.print("Found ");
+    Serial.print(peripheral.address());
+    Serial.print(" '");
+    Serial.print(peripheral.localName());
+    Serial.print("' ");
+    Serial.print(peripheral.advertisedServiceUuid());
+    Serial.println();
+
+    if (peripheral.localName() != "ECE420BT") {
+      return;
+    }
+
+    // stop scanning
+    BLE.stopScan();
+
+    control(peripheral);
+
+    // peripheral disconnected, start scanning again
+    BLE.scanForUuid("19b10000-e8f2-537e-4f6c-d104768a1214");
+  }
+}
+
+void control(BLEDevice peripheral) {
+  // connect to the peripheral
+  Serial.println("Connecting ...");
+
+  if (peripheral.connect()) {
+    Serial.println("Connected");
+  } else {
+    Serial.println("Failed to connect!");
+    return;
+  }
+
+  // discover peripheral attributes
+  Serial.println("Discovering attributes ...");
+  if (peripheral.discoverAttributes()) {
+    Serial.println("Attributes discovered");
+  } else {
+    Serial.println("Attribute discovery failed!");
+    peripheral.disconnect();
+    return;
+  }
+
+  // retrieve the LED characteristic
+  BLECharacteristic systemCharacteristic = peripheral.characteristic("19b10001-e8f2-537e-4f6c-d104768a1214");
+
+  if (!systemCharacteristic) {
+    Serial.println("Peripheral does not have LED characteristic!");
+    peripheral.disconnect();
+    return;
+  } else if (!systemCharacteristic.canWrite()) {
+    Serial.println("Peripheral does not have a writable LED characteristic!");
+    //peripheral.disconnect();
+    //return;
+  }
+
+  char person[256];
+  bool one = true;
+  bool addDelete = false;
+  int count = 0;
+  String named;
+  char choice;
+ 
+  while (peripheral.connected()) {
+    byte check = 0x00;
+    //Serial.print("ZERO: ");
+    //Serial.println(check);
+    if (!addDelete) {
+      systemCharacteristic.readValue(check);
+    } else {
+      check = 0xFF;
+    }
+
+    if (check == 0xFF || one) {
+      if (!Serial.available() && !addDelete) {
+        systemCharacteristic.writeValue((byte)0xAA);
+      } else {
+        if (!addDelete) {
+          named = Serial.readString();
+          choice = named.charAt(0);
+          named = named.substring(named.indexOf(' ') + 1);
+          if (choice == 'A') {
+            person[0] = 'A';
+          } else if (choice == 'D') {
+            person[0] = 'D';
+          } else {
+            Serial.println("Add or Delete was misspelled");
+          }
+
+          addDelete = true;
+       
+          Serial.print(named);
+          for (int i = 0; i < sizeof(named); i++) {
+            person[i + 1] = named[i];
+          }
+        }  
+       
+        if (person[count] != 0) {
+          Serial.println(person[count]);
+          systemCharacteristic.writeValue((byte)person[count]);
+          delay(500);
+        } else {
+          addDelete = false;
+          systemCharacteristic.writeValue((byte)91);
+          Serial.println();
+          count = 0;
+
+          while (person[count] != 0) {
+            person[count] = 0;
+            count = count + 1;
+          }
+
+          count = -1;
+          delay(750);
+        }
+       
+        count = count + 1;
+      }
+    }
+
+    one = false;
+  }
+  Serial.println("Peripheral disconnected");
+}
